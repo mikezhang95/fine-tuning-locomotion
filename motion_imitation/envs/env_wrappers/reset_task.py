@@ -150,6 +150,36 @@ class ResetTask(object):
 
     return r_stand
 
+  def _calc_reward_sit(self):
+    tar_h = SITTING_POSE[2]
+    pos_size = motion_data.MotionData.POS_SIZE
+    rot_size = motion_data.MotionData.ROT_SIZE
+
+    root_pos = self._env.robot.GetBasePosition()
+    root_h = root_pos[2]
+    h_err = tar_h - root_h
+    h_err /= tar_h
+    h_err = np.clip(h_err, 0.0, 1.0)
+    r_height = 1.0 - h_err
+
+    tar_pose = SITTING_POSE[(pos_size + rot_size):]
+    joint_pose = self._env.robot.GetTrueMotorAngles()
+    pose_diff = tar_pose - joint_pose
+    pose_diff = JOINT_WEIGHTS * JOINT_WEIGHTS * pose_diff * pose_diff
+    pose_err = np.sum(pose_diff)
+    r_pose = np.exp(-0.6 * pose_err)
+
+    tar_vel = 0.0
+    joint_vel = self._env.robot.GetMotorVelocities()
+    vel_diff = tar_vel - joint_vel
+    vel_diff = vel_diff * vel_diff
+    vel_err = np.sum(vel_diff)
+    r_vel = np.exp(-0.02 * vel_err)
+
+    r_sit = 0.2 * r_height + 0.6 * r_pose + 0.2 * r_vel
+
+    return r_sit
+
   def _calc_reward_end_effector(self, ref_joint_angles):
     """Get the end effector reward for sim or real A1 robot."""
     pos_size = motion_data.MotionData.POS_SIZE
@@ -345,14 +375,19 @@ class RollTask(ResetTask):
 
     return reward
 
+
 class StandTask(ResetTask):
   """Imitation reference motion task."""
 
   def __init__(self, terminal_conditions=()):
     super().__init__(terminal_conditions)
 
-    self._fall_init_rot_x_min = -1.0 / 4.0 * np.pi
-    self._fall_init_rot_x_max = 1.0 / 4.0 * np.pi
+    self._fall_init_rot_x_min = -1.0 / 16.0 * np.pi
+    self._fall_init_rot_x_max = 1.0 / 16.0 * np.pi
+
+    # task: stand from sit position and fall position
+    self._stand_prob = 0.0
+    self._sit_prob = 0.8
 
     return
   
@@ -361,6 +396,39 @@ class StandTask(ResetTask):
     del env
     
     r_stand = self._calc_reward_stand()
-    reward = r_stand
+    torques = self._env.robot.GetMotorTorques()
+    torque_penalty = np.sum(np.abs(torques))
+
+    reward = r_stand - 1e-3 * torque_penalty
 
     return reward
+
+
+class SitTask(ResetTask):
+  """Imitation reference motion task."""
+
+  def __init__(self, terminal_conditions=()):
+    super().__init__(terminal_conditions)
+
+    self._fall_init_rot_x_min = -1.0 / 16.0 * np.pi
+    self._fall_init_rot_x_max = 1.0 / 16.0 * np.pi
+
+    # task: sit from stand position and fall position
+    self._stand_prob = 0.8
+    self._sit_prob = 0.0
+
+    return
+  
+  def reward(self, env):
+    """Get the reward without side effects."""
+    del env
+    
+    r_sit = self._calc_reward_sit()
+    torques = self._env.robot.GetMotorTorques()
+    torque_penalty = np.sum(np.abs(torques))
+
+    reward = r_sit - 1e-3 * torque_penalty
+
+    return reward
+
+

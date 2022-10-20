@@ -38,14 +38,22 @@ from motion_imitation.robots import robot_config
 
 
 def build_env(task,
+              motion_files=None,
+              num_parallel_envs=0,
               mode="train",
               enable_randomizer=True,
               enable_rendering=False,
               reset_at_current_position=False,
               use_real_robot=False,
               realistic_sim=False):
+  assert len(motion_files) > 0
 
-  # === gym configurations ===
+  if task == "reset":
+    curriculum_episode_length_start = curriculum_episode_length_end = 150
+  else:
+    curriculum_episode_length_start = 50
+    curriculum_episode_length_end = 600
+
   sim_params = locomotion_gym_config.SimulationParameters()
   sim_params.enable_rendering = enable_rendering
   sim_params.allow_knee_contact = True
@@ -55,7 +63,6 @@ def build_env(task,
 
   gym_config = locomotion_gym_config.LocomotionGymConfig(simulation_parameters=sim_params)
 
-  # === robot configurations ===
   robot_kwargs = {"self_collision_enabled": True}
   ref_state_init_prob = 0.0
 
@@ -74,20 +81,14 @@ def build_env(task,
       action_limit=np.array([0.802851455917, 4.18879020479, -0.916297857297] *
                             4) - np.array([0, 0.9, -1.8] * 4))
 
-  # === robot sensors ===
   sensors = [
       sensor_wrappers.HistoricSensorWrapper(wrapped_sensor=robot_sensors.MotorAngleSensor(num_motors=num_motors), num_history=3),
       sensor_wrappers.HistoricSensorWrapper(wrapped_sensor=robot_sensors.IMUSensor(), num_history=3),
       sensor_wrappers.HistoricSensorWrapper(wrapped_sensor=environment_sensors.LastActionSensor(num_actions=num_motors), num_history=3)
   ]
 
-  # === task ===
   if task == "reset":
     task = reset_task.ResetTask()
-  elif task == "stand":
-    task = reset_task.StandTask()
-  elif task == "sit":
-    task = reset_task.SitTask()
   else:
     task = imitation_task.ImitationTask(
         ref_motion_filenames=motion_files,
@@ -113,12 +114,13 @@ def build_env(task,
 
   env = observation_dictionary_to_array_wrapper.ObservationDictionaryToArrayWrapper(env)
   env = trajectory_generator_wrapper_env.TrajectoryGeneratorWrapperEnv(env, trajectory_generator=traj_gen)
-  # if mode == "test":
-  #   curriculum_episode_length_start = curriculum_episode_length_end
 
-  # env = imitation_wrapper_env.ImitationWrapperEnv(env,
-  #                                                 episode_length_start=curriculum_episode_length_start,
-  #                                                 episode_length_end=curriculum_episode_length_end,
-  #                                                 curriculum_steps=2000000,
-  #                                                 num_parallel_envs=num_parallel_envs)
+  if mode == "test":
+    curriculum_episode_length_start = curriculum_episode_length_end
+
+  env = imitation_wrapper_env.ImitationWrapperEnv(env,
+                                                  episode_length_start=curriculum_episode_length_start,
+                                                  episode_length_end=curriculum_episode_length_end,
+                                                  curriculum_steps=2000000,
+                                                  num_parallel_envs=num_parallel_envs)
   return env

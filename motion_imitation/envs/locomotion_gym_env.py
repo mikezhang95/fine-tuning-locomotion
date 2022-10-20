@@ -367,6 +367,7 @@ class LocomotionGymEnv(gym.Env):
     reward = self._reward()
 
     done = self._termination()
+    done = False # M: force to learn
     self._env_step_counter += 1
     if done:
       self._robot.Terminate()
